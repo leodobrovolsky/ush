@@ -84,18 +84,46 @@ int mx_tolower(int c);
 int mx_toupper(int c);
 
 
-typedef struct s_str_sh {
+
+#define NO_PIPELINE 0
+#define RIGHT_PIPELINE 1
+#define LIGHT_PIPELINE 2
+
+
+typedef struct s_sh_str {
     char *name;
     char type;
-    struct s_str_sh *next;
-} t_str_sh;
+} t_sh_str;
+
+typedef struct s_sh_str_list {
+    char *name;
+    char type;
+    struct s_sh_str_list *next;
+} t_sh_str_list;
+
+typedef struct s_sh_operand {
+    char *name;
+    char **params;
+    char type; 
+} t_sh_operand;
+
+typedef struct s_sh_queue {
+    t_sh_operand *opr1;
+    t_sh_operand *opr2;
+    char *act;
+    struct s_sh_queue *next;
+} t_sh_queue;
 
 bool mx_check_symbol(char s) {
-    if (s > 'a' && s < 'z')
+    if (s >= 'a' && s <= 'z')
         return true;
-    else if (s > 'A' && s < 'Z')
+    else if (s >= 'A' && s <= 'Z')
         return true;
-    else if (s > '0' && s < '9')
+    else if (s >= '0' && s <= '9')
+        return true;
+    else if (s == '/')
+        return true;
+    else if (s == '.')
         return true;
     return false;
 }
@@ -107,6 +135,7 @@ bool mx_check_bracket(char s) {
         case '{': return true; break;
         case '}': return true; break;
         case '\'': return true; break;
+        case '$': return true; break;
         case '\"': return true; break;
         default: return false; break;
     }
@@ -118,6 +147,8 @@ bool mx_check_spec_symbol(char s) {
         case '-': return true; break;
         case '\\': return true; break;
         case '~': return true; break;
+        case '#': return true; break;
+        case '?': return true; break;
         default: return false; break;
     }
 }
@@ -133,8 +164,8 @@ bool mx_check_command(char s) {
     }
 }
 
-t_str_sh *mx_str_sh_create(char *s, char type) {
-    t_str_sh *tmp = malloc(sizeof(t_str_sh));
+t_sh_str_list *mx_sh_str_list_create(char *s, char type) {
+    t_sh_str_list *tmp = malloc(sizeof(t_sh_str_list));
 
     tmp->name = s;
     tmp->type = type;
@@ -154,23 +185,25 @@ int mx_command_len(char *s) {
     return len;
 }
 
-void mx_str_sh_add(t_str_sh **pstr, char *s, char type, int len) {
-    t_str_sh *temp = *pstr;
+void mx_str_sh_add(t_sh_str_list **pstr, char *s, char type, int len) {
+    t_sh_str_list *temp = *pstr;
     char *str = mx_strndup(s, len);
 
     if (!temp)
-        *pstr = mx_str_sh_create(str, type);
+        *pstr = mx_sh_str_list_create(str, type);
     else {
         while (temp->next)
             temp = temp->next;
-        temp->next = mx_str_sh_create(str, type);
+        temp->next = mx_sh_str_list_create(str, type);
     }
 }
 
-t_str_sh *mx_parse_input_str(char *str) {
-    t_str_sh *pstr = NULL;
-    int bracket_value = 0;
+
+t_sh_str_list *mx_parse_input_str(char *str) {
+    t_sh_str_list *pstr = NULL;
     int len = 0;
+    int bracket_round = 0;
+    int bracket_curly = 0;
 
     for (int i = 0; str[i]; i++) {
         if (mx_check_command(str[i]) && mx_check_command(str[i+1])) {
@@ -185,41 +218,160 @@ t_str_sh *mx_parse_input_str(char *str) {
             mx_str_sh_add(&pstr, &str[i], 'c', len);
             i += len - 1;
         }
+        else if (mx_check_spec_symbol(str[i]))
+            mx_str_sh_add(&pstr, &str[i], 's', 1); 
+        else if (mx_check_bracket(str[i])) {
+            if (str[i] == '$' && str[i+1] == '(') {
+                mx_str_sh_add(&pstr, &str[i], 'b', 2);
+                i++;
+            }
+            else if (str[i] == '$' && str[i+1] == '{') {
+                mx_str_sh_add(&pstr, &str[i], 'b', 2);
+                i++;                
+            }
+            else if (str[i] == ')' && !bracket_round)
+                mx_str_sh_add(&pstr, "$)", 'b', 2);
+            else if (str[i] == '(') {
+                mx_str_sh_add(&pstr, "(", 'b', 1); 
+                bracket_round += 1;
+            }
+            else if (str[i] == ')' && bracket_round) {
+                mx_str_sh_add(&pstr, ")", 'b', 1);
+                bracket_round -= 1;
+            }
+            else if (str[i] == '}' && bracket_curly) {
+                mx_str_sh_add(&pstr, "}", 'b', 1);
+                bracket_curly -= 1;
+            }  
+            else if (str[i] == '{') {
+                mx_str_sh_add(&pstr, "{", 'b', 1); 
+                bracket_curly += 1;
+            } 
+            else if (str[i] == '}' && !bracket_curly)
+                mx_str_sh_add(&pstr, "$}", 'b', 2);       
+            else
+                mx_str_sh_add(&pstr, "$", 'b', 1); 
+        }
     }
     return pstr;
 }
 
-
-void mx_print_str_sh(t_str_sh *pstr) {
-    t_str_sh *tmp = pstr;
+void mx_print_str_sh(t_sh_str_list *pstr) {
+    t_sh_str_list *tmp = pstr;
 
     if (!tmp)
         mx_printstr("null");
     else
         while(tmp) {
             mx_printstr("Elem:");
-            mx_printchar('\n');
+            mx_printchar(' ');
             mx_printstr(tmp->name);
-            mx_printchar('\n');
+            mx_printchar(' ');
             mx_printchar(tmp->type);
             mx_printchar('\n');
             tmp = tmp->next;
         }
 }
 
+int mx_get_sh_str_len(t_sh_str_list *lstr) {
+    int len = 0;
+    t_sh_str_list *tmp = lstr;
+
+    
+    if (tmp)
+        while(tmp) {
+            tmp = tmp->next;
+            len++;
+        }
+    return len;
+}
+
+t_sh_str **mx_sh_str_create(int len) {
+    t_sh_str **pstr = (t_sh_str**)malloc(sizeof(t_sh_str*) * len);
+
+    for (int i = 0; i <= len; i++)
+        pstr[i] = NULL;
+    return pstr;
+}
+
+t_sh_str **mx_get_sh_pstr(t_sh_str_list *lstr, int len) {
+    t_sh_str **pstr = mx_sh_str_create(len);
+    t_sh_str_list *tmp = lstr;
+
+    for (int i = 0; tmp; tmp = tmp->next, i++) {
+        pstr[i] = (t_sh_str*)malloc(sizeof(t_sh_str));
+        pstr[i]->name = tmp->name;
+        pstr[i]->type = tmp->type;
+    }
+    return pstr;
+}
+
+t_sh_str **mx_copy_sh_str(t_sh_str **pstr, len) {
+    t_sh_str **copy = mx_sh_str_create(len);
+
+    for (int i = 0; pstr[i]; i++) {
+        copy[i] = (t_sh_str)malloc(sizeof(t_sh_str));
+        copy[i]->name = pstr[i]->name;
+        copy[i]->type = pstr[i]->type;
+    }
+    return copy;
+}
+
+bool mx_check_one_command(t_sh_str *pstr) {
+    if (pstr[i]->type = 'b')
+        return true;
+    else
+        return false;
+}
+
+void mx_add_queue(char *oper1, char *oper2, char *act) {
+
+}
+
+t_sh_queue *mx_create_queue_arr(t_sh_str **pstr, int len) {
+    t_sh_queue *queue = NULL;
+    t_sh_str **pstr_copy = mx_copy_sh_str(pstr, len);
+    int i = 0;
+    int count = 0;
+
+    if (pstr) {
+        while (1) {
+            i = 0;
+            while (pstr[i]) {
+                if (mx_check_one_command(pstr[i])) {
+                    if (mx_strcmp(pstr[i]->name, "$")) {
+                        mx_add_queue();
+                    }
+
+                }
+            }
+            count++;
+            if (count >= len)
+                break;
+        }
+    }
+    return queue;
+}
 
 void mx_loop() {
     char *str = NULL;
-    t_str_sh *pstr = NULL;
+    t_sh_str_list *lstr = NULL;
+    t_sh_str **pstr = NULL;
+    int len = 0;
+    t_sh_queue *queue = NULL;
 
-    //printf(">");
-    str = mx_strdup("ls && pwd");
-    pstr = mx_parse_input_str(str);
-    mx_print_str_sh(pstr);
+    str = mx_strdup("ls /dev/null");
+    lstr = mx_parse_input_str(str);
+    //mx_print_str_sh(lstr);
+    len = mx_get_sh_str_len(lstr);
+    pstr = mx_get_sh_pstr(lstr, len);
+    queue = mx_create_queue_arr(pstr, len);
+
 }
 
 
 int main (int argc, char **argv) {
     mx_loop();
+
     return 0;
 }
