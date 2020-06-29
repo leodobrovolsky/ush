@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <sys/stat.h>
 
 #define SPEC_SYMBOL "-$/~\\"
 #define BRACKETS "(){}\'\'\"\""
@@ -88,6 +89,7 @@ int mx_toupper(int c);
 #define NO_PIPELINE 0
 #define RIGHT_PIPELINE 1
 #define LIGHT_PIPELINE 2
+#define RIGHT_LIGHT_PIPELINE 3
 
 #define MY_COM ""
 
@@ -126,6 +128,7 @@ typedef struct s_main_sh {
     t_sh_str **pstr;
     t_sh_str_list *lstr;
     int pstr_len;
+    char **history;
 } t_main_sh;
 
 bool mx_check_symbol(char s) {
@@ -349,8 +352,24 @@ t_sh_queue *mx_create_queue(t_sh_operand *oper1, t_sh_operand *oper2, char *act)
 }
 
 char mx_get_operand_type(t_main_sh *main, char *name) {
-    
+    struct stat buf;
+    stat (name, &buf);
+
+    if (mx_get_substr_index(MY_COM, name) >= 0)
+        return 'm';
+    else if (S_IXUSR == (S_IXUSR & buf.st_mode))
+        return 'x';
+    else if (buf.st_mode > 0)
+        return 'f';
+    else 
+        return 's';
 }
+
+
+int mx_get_pipeline_type(char *name) {
+    return NO_PIPELINE;
+}
+
 
 t_sh_operand *mx_get_operand(t_main_sh *main, char *str) {
     t_sh_operand *oper = (t_sh_operand*)malloc(sizeof(t_sh_operand));
@@ -365,7 +384,7 @@ t_sh_operand *mx_get_operand(t_main_sh *main, char *str) {
     }
     else {
         oper->name = NULL;
-        oper->param = NULL;
+        oper->params = NULL;
     }
     oper->type = mx_get_operand_type(main, oper->name);
     oper->pipeline_type = mx_get_pipeline_type(oper->name);
@@ -387,6 +406,35 @@ void mx_add_queue(t_main_sh *main, char *str1, char *str2, char *act) {
     }
 }
 
+t_sh_str **mx_sh_treat_brackets(t_main_sh *main) {
+    t_sh_str **pstr = mx_sh_str_create(main->pstr_len);
+    char *tmp = NULL;
+    int j = 0;
+
+    for (int i = 0; main->pstr[i]; i++) {
+        pstr[i] = (t_sh_str*)malloc(sizeof(t_sh_str));
+        
+    }
+    return pstr;
+}
+
+t_sh_str **mx_sh_treat_params(t_main_sh *main) {
+    int i = 0;
+    char *str = NULL;
+    char *tmp = NULL;
+
+    while (main->pstr[i]) {
+        while (main->pstr[i]->type == 'c') {
+            if (main->pstr[i+1]->type == 'c') {
+                main->pstr[i]->type == '=';
+                //str = mx_strjoin(tmp, main->pstr[])           
+            }
+            i++;
+        }
+        i++;
+    }
+}
+
 void mx_create_queue_arr(t_main_sh *main) {
     t_sh_str **pstr_copy = mx_copy_sh_str(main->pstr, main->pstr_len);
     int i = 0;
@@ -394,18 +442,7 @@ void mx_create_queue_arr(t_main_sh *main) {
 
     while (1) {
         i = 0;
-        while (main->pstr[i]) {
-            //если унарная операция
-            if (mx_check_one_command(main->pstr[i])) {
-                //если символ $
-                if (mx_strcmp(main->pstr[i]->name, "$")) {
-                    // если следующий - строка
-                    if (main->pstr[i+1]->type == 'c')
-                        mx_add_queue(main, main->pstr[i+1]->name, NULL, "$");
-                }
-
-            }
-        }
+        pstr_copy = mx_sh_treat_params(main);
         count++;
         if (count >= main->pstr_len)
             break;
@@ -430,6 +467,7 @@ t_main_sh *mx_create_main_sh(char *str, char **env) {
     main->alias = NULL;
     main->path = mx_strsplit(path, ':');
     main->pstr_len = 0;
+    main->history = NULL;
     mx_strdel(&path);
     return main;
 }
