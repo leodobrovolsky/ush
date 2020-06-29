@@ -89,6 +89,7 @@ int mx_toupper(int c);
 #define RIGHT_PIPELINE 1
 #define LIGHT_PIPELINE 2
 
+#define MY_COM ""
 
 typedef struct s_sh_str {
     char *name;
@@ -105,14 +106,27 @@ typedef struct s_sh_operand {
     char *name;
     char **params;
     char type; 
+    int pipeline_type;
 } t_sh_operand;
 
 typedef struct s_sh_queue {
-    t_sh_operand *opr1;
-    t_sh_operand *opr2;
+    t_sh_operand *oper1;
+    t_sh_operand *oper2;
     char *act;
     struct s_sh_queue *next;
 } t_sh_queue;
+
+typedef struct s_main_sh {
+    char **path;
+    char **alias;
+    char **env;
+    char **my_com;
+    t_sh_queue *queue;
+    char *input_str;
+    t_sh_str **pstr;
+    t_sh_str_list *lstr;
+    int pstr_len;
+} t_main_sh;
 
 bool mx_check_symbol(char s) {
     if (s >= 'a' && s <= 'z')
@@ -273,9 +287,9 @@ void mx_print_str_sh(t_sh_str_list *pstr) {
         }
 }
 
-int mx_get_sh_str_len(t_sh_str_list *lstr) {
+void mx_get_sh_str_len(t_main_sh *main) {
     int len = 0;
-    t_sh_str_list *tmp = lstr;
+    t_sh_str_list *tmp = main->lstr;
 
     
     if (tmp)
@@ -283,7 +297,7 @@ int mx_get_sh_str_len(t_sh_str_list *lstr) {
             tmp = tmp->next;
             len++;
         }
-    return len;
+    main->pstr_len = len;
 }
 
 t_sh_str **mx_sh_str_create(int len) {
@@ -294,23 +308,23 @@ t_sh_str **mx_sh_str_create(int len) {
     return pstr;
 }
 
-t_sh_str **mx_get_sh_pstr(t_sh_str_list *lstr, int len) {
-    t_sh_str **pstr = mx_sh_str_create(len);
-    t_sh_str_list *tmp = lstr;
+void mx_get_sh_pstr(t_main_sh *main) {
+    t_sh_str **pstr = mx_sh_str_create(main->pstr_len);
+    t_sh_str_list *tmp = main->lstr;
 
     for (int i = 0; tmp; tmp = tmp->next, i++) {
         pstr[i] = (t_sh_str*)malloc(sizeof(t_sh_str));
         pstr[i]->name = tmp->name;
         pstr[i]->type = tmp->type;
     }
-    return pstr;
+    main->pstr = pstr;
 }
 
-t_sh_str **mx_copy_sh_str(t_sh_str **pstr, len) {
+t_sh_str **mx_copy_sh_str(t_sh_str **pstr, int len) {
     t_sh_str **copy = mx_sh_str_create(len);
 
     for (int i = 0; pstr[i]; i++) {
-        copy[i] = (t_sh_str)malloc(sizeof(t_sh_str));
+        copy[i] = (t_sh_str*)malloc(sizeof(t_sh_str));
         copy[i]->name = pstr[i]->name;
         copy[i]->type = pstr[i]->type;
     }
@@ -318,60 +332,126 @@ t_sh_str **mx_copy_sh_str(t_sh_str **pstr, len) {
 }
 
 bool mx_check_one_command(t_sh_str *pstr) {
-    if (pstr[i]->type = 'b')
+    if (pstr->type == 'b')
         return true;
     else
         return false;
 }
 
-void mx_add_queue(char *oper1, char *oper2, char *act) {
+t_sh_queue *mx_create_queue(t_sh_operand *oper1, t_sh_operand *oper2, char *act) {
+    t_sh_queue *queue = (t_sh_queue*)malloc(sizeof(t_sh_queue));
 
-}
-
-t_sh_queue *mx_create_queue_arr(t_sh_str **pstr, int len) {
-    t_sh_queue *queue = NULL;
-    t_sh_str **pstr_copy = mx_copy_sh_str(pstr, len);
-    int i = 0;
-    int count = 0;
-
-    if (pstr) {
-        while (1) {
-            i = 0;
-            while (pstr[i]) {
-                if (mx_check_one_command(pstr[i])) {
-                    if (mx_strcmp(pstr[i]->name, "$")) {
-                        mx_add_queue();
-                    }
-
-                }
-            }
-            count++;
-            if (count >= len)
-                break;
-        }
-    }
+    queue->oper1 = oper1;
+    queue->oper2 = oper2;
+    queue->act = act;
+    queue->next = NULL;
     return queue;
 }
 
-void mx_loop() {
+char mx_get_operand_type(t_main_sh *main, char *name) {
+    
+}
+
+t_sh_operand *mx_get_operand(t_main_sh *main, char *str) {
+    t_sh_operand *oper = (t_sh_operand*)malloc(sizeof(t_sh_operand));
+    char **param = mx_strsplit(str, ' ');
+
+    if (param && param[0]) {
+        oper->name = param[0];
+        if (param[1])
+            oper->params = &param[1];
+        else
+            oper->params = NULL;
+    }
+    else {
+        oper->name = NULL;
+        oper->param = NULL;
+    }
+    oper->type = mx_get_operand_type(main, oper->name);
+    oper->pipeline_type = mx_get_pipeline_type(oper->name);
+    return oper;
+}
+
+
+void mx_add_queue(t_main_sh *main, char *str1, char *str2, char *act) {
+    t_sh_queue *tmp = main->queue;
+    t_sh_operand *oper1 = mx_get_operand(main, str1);
+    t_sh_operand *oper2 = mx_get_operand(main, str2);
+
+    if (!tmp)
+        main->queue = mx_create_queue(oper1, oper2, act);
+    else {
+        while(tmp->next) 
+            tmp = tmp->next;
+        tmp->next = mx_create_queue(oper1, oper2, act);
+    }
+}
+
+void mx_create_queue_arr(t_main_sh *main) {
+    t_sh_str **pstr_copy = mx_copy_sh_str(main->pstr, main->pstr_len);
+    int i = 0;
+    int count = 0;
+
+    while (1) {
+        i = 0;
+        while (main->pstr[i]) {
+            //если унарная операция
+            if (mx_check_one_command(main->pstr[i])) {
+                //если символ $
+                if (mx_strcmp(main->pstr[i]->name, "$")) {
+                    // если следующий - строка
+                    if (main->pstr[i+1]->type == 'c')
+                        mx_add_queue(main, main->pstr[i+1]->name, NULL, "$");
+                }
+
+            }
+        }
+        count++;
+        if (count >= main->pstr_len)
+            break;
+    }
+}
+
+t_main_sh *mx_create_main_sh(char *str, char **env) {
+    t_main_sh *main = (t_main_sh*)malloc(sizeof(t_main_sh));
+    char *path = NULL;
+
+    for (int i = 0; env[i]; i++)
+        if (mx_get_substr_index(env[i], "PATH=") >= 0) {
+            path = mx_strdup(&env[i][6]);
+            break;
+        }
+    main->input_str = str;
+    main->pstr = NULL;
+    main->lstr = NULL;
+    main->queue = NULL;
+    main->my_com = mx_strsplit(MY_COM, ':');
+    main->env = env;
+    main->alias = NULL;
+    main->path = mx_strsplit(path, ':');
+    main->pstr_len = 0;
+    mx_strdel(&path);
+    return main;
+}
+
+void mx_loop(char **env) {
     char *str = NULL;
-    t_sh_str_list *lstr = NULL;
-    t_sh_str **pstr = NULL;
     int len = 0;
-    t_sh_queue *queue = NULL;
+    t_main_sh *main = NULL;
 
     str = mx_strdup("ls /dev/null");
-    lstr = mx_parse_input_str(str);
+    main = mx_create_main_sh(str, env);
+    main->lstr = mx_parse_input_str(str);
     //mx_print_str_sh(lstr);
-    len = mx_get_sh_str_len(lstr);
-    pstr = mx_get_sh_pstr(lstr, len);
-    queue = mx_create_queue_arr(pstr, len);
+    mx_get_sh_str_len(main);
+    mx_get_sh_pstr(main);
+    mx_create_queue_arr(main);
 
 }
 
 
-int main (int argc, char **argv) {
-    mx_loop();
+int main (int argc, char **argv, char **env) {
+    mx_loop(env);
 
     return 0;
 }
