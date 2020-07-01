@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #define SPEC_SYMBOL "-$/~\\"
 #define BRACKETS "(){}\'\'\"\""
@@ -115,7 +116,6 @@ typedef struct s_sh_queue {
     t_sh_operand *oper1;
     t_sh_operand *oper2;
     char *act;
-    struct s_sh_queue *next;
 } t_sh_queue;
 
 typedef struct s_main_sh {
@@ -154,6 +154,7 @@ bool mx_check_bracket(char s) {
         case '\'': return true; break;
         case '$': return true; break;
         case '\"': return true; break;
+        case '`': return true; break;
         default: return false; break;
     }
 }
@@ -323,16 +324,15 @@ void mx_get_sh_pstr(t_main_sh *main) {
     main->pstr = pstr;
 }
 
-t_sh_str **mx_copy_sh_str(t_sh_str **pstr, int len) {
-    t_sh_str **copy = mx_sh_str_create(len);
+t_sh_str *mx_copy_sh_str(t_sh_str *pstr) {
+    t_sh_str *copy = (t_sh_str*)malloc(sizeof(t_sh_str));
 
-    for (int i = 0; pstr[i]; i++) {
-        copy[i] = (t_sh_str*)malloc(sizeof(t_sh_str));
-        copy[i]->name = pstr[i]->name;
-        copy[i]->type = pstr[i]->type;
-    }
+    copy->name = mx_strdup(pstr->name);
+    copy->type = pstr->type;
     return copy;
 }
+
+
 
 bool mx_check_one_command(t_sh_str *pstr) {
     if (pstr->type == 'b')
@@ -347,7 +347,6 @@ t_sh_queue *mx_create_queue(t_sh_operand *oper1, t_sh_operand *oper2, char *act)
     queue->oper1 = oper1;
     queue->oper2 = oper2;
     queue->act = act;
-    queue->next = NULL;
     return queue;
 }
 
@@ -392,57 +391,157 @@ t_sh_operand *mx_get_operand(t_main_sh *main, char *str) {
 }
 
 
-void mx_add_queue(t_main_sh *main, char *str1, char *str2, char *act) {
-    t_sh_queue *tmp = main->queue;
-    t_sh_operand *oper1 = mx_get_operand(main, str1);
-    t_sh_operand *oper2 = mx_get_operand(main, str2);
+// void mx_add_queue(t_main_sh *main, char *str1, char *str2, char *act) {
+//     t_sh_queue *tmp = main->queue;
+//     t_sh_operand *oper1 = mx_get_operand(main, str1);
+//     t_sh_operand *oper2 = mx_get_operand(main, str2);
 
-    if (!tmp)
-        main->queue = mx_create_queue(oper1, oper2, act);
-    else {
-        while(tmp->next) 
-            tmp = tmp->next;
-        tmp->next = mx_create_queue(oper1, oper2, act);
-    }
+//     if (!tmp)
+//         main->queue = mx_create_queue(oper1, oper2, act);
+//     else {
+//         while(tmp->next) 
+//             tmp = tmp->next;
+//         tmp->next = mx_create_queue(oper1, oper2, act);
+//     }
+// }
+
+void mx_del_sh_str(t_sh_str **pstr) {
+    //mx_strdel(pstr->name);
+    free(*pstr);
+    *pstr = NULL;
 }
 
-t_sh_str **mx_sh_treat_brackets(t_main_sh *main) {
-    t_sh_str **pstr = mx_sh_str_create(main->pstr_len);
-    char *tmp = NULL;
+t_sh_str *mx_queue_execve_unare(t_main_sh *main, int index) {
+    if (main)
+        index++;
+    return NULL;
+}
+
+t_sh_str *mx_queue_execve_binary(t_main_sh *main, int index) {
+    if (main)
+        index++;
+    return NULL;
+}
+
+void mx_sh_treat_brackets(t_main_sh *main) {
     int j = 0;
+    t_sh_str *tmp = NULL;
 
     for (int i = 0; main->pstr[i]; i++) {
-        pstr[i] = (t_sh_str*)malloc(sizeof(t_sh_str));
-        
+        if (main->pstr[i]->type == 's' && main->pstr[i+1] && main->pstr[i+2]
+            && !mx_strcmp(main->pstr[i]->name, main->pstr[i+2]->name)) {
+                main->pstr[i]->type = '=';
+                main->pstr[i+2]->type = '=';
+                tmp = mx_copy_sh_str(main->pstr[i+1]);
+                mx_del_sh_str(&main->pstr[i+1]);
+                main->pstr[i+1] = mx_queue_execve_unare(main, i);
+                mx_del_sh_str(&tmp);
+        }
     }
-    return pstr;
 }
 
-t_sh_str **mx_sh_treat_params(t_main_sh *main) {
-    int i = 0;
-    char *str = NULL;
+int mx_get_end_params_index(t_sh_str **pstr, int begin) {
+    int end = begin;
+
+    while(pstr[end]->type == 'c')
+        end++;
+    return end;
+}
+
+// void mx_queue_reset(t_sh_str **pstr, int begin, int end) {
+//     for (int i = begin; i < end; i++)
+//         pstr[i]->type = "=";
+// }
+
+
+void mx_queue_hyphenation_params(t_sh_str **pstr, int begin, int end) {
     char *tmp = NULL;
 
-    while (main->pstr[i]) {
-        while (main->pstr[i]->type == 'c') {
-            if (main->pstr[i+1]->type == 'c') {
-                main->pstr[i]->type == '=';
-                //str = mx_strjoin(tmp, main->pstr[])           
-            }
-            i++;
+    for (int i = begin + 1; i < end; i++) {
+        tmp = mx_strdup(pstr[begin]->name);
+        mx_strdel(&pstr[begin]->name);
+        pstr[begin]->name = mx_strjoin(pstr[begin]->name, pstr[i]->name);;
+        mx_strdel(&pstr[i]->name);
+        pstr[i]->type = '=';
+        mx_strdel(&tmp);
+    }
+}
+
+void mx_sh_treat_params(t_main_sh *main) {
+    int i = 0;
+    int end = 0;
+
+    while (main->pstr[i] != NULL) {
+        mx_printint(i);
+        if (main->pstr[i]->type == 'c') {
+            //write(1, "2\n", 2);
+            end = mx_get_end_params_index(main->pstr, i);
+            mx_queue_hyphenation_params(main->pstr, i, end);
+            //write(1, "1\n", 2);
         }
         i++;
     }
 }
 
-void mx_create_queue_arr(t_main_sh *main) {
-    t_sh_str **pstr_copy = mx_copy_sh_str(main->pstr, main->pstr_len);
+void mx_sh_treat_commands(t_main_sh *main) {
+    int j = 0;
+    t_sh_str *tmp = NULL;
+
+    for (int i = 0; main->pstr[i]; i++)
+        if (main->pstr[i]->type == 'c' && main->pstr[i+1] && main->pstr[i+2] 
+            && main->pstr[i+2]->type == 'c' && main->pstr[i+1]->type == 'k') {
+                main->pstr[i+1]->type = '=';
+                main->pstr[i+2]->type = '=';
+                tmp = mx_copy_sh_str(main->pstr[i]); 
+                mx_del_sh_str(&main->pstr[i]);
+                main->pstr[i] = mx_queue_execve_binary(main, i);
+                mx_del_sh_str(&tmp);              
+        }
+
+}
+
+// int mx_get_pstr_clear_len(t_sh_str **pstr) {
+//     int len = 0;
+
+//     for (int i = 0; pstr[i]; i++)
+//         if (pstr[i]->type != '=')
+//             len++;
+//     return len;
+// }
+
+void mx_sh_str_clear(t_main_sh *main) {
+    char *tmp_name = NULL;
+    char tmp_type;
+    int j = 0;
+
+    for (int i = 0; main->pstr[i]; i++)
+        if (main->pstr[i]->type != '=') {
+            tmp_name = mx_strdup(main->pstr[i]->name);
+            tmp_type = main->pstr[i]->type;
+            mx_strdel(&main->pstr[j]->name);
+            main->pstr[j]->name = mx_strdup(tmp_name);
+            main->pstr[j]->type = tmp_type;
+            mx_strdel(&tmp_name);
+            j++;
+        }
+}
+
+//work
+void mx_execve_pstr(t_main_sh *main) {
     int i = 0;
     int count = 0;
 
     while (1) {
         i = 0;
-        pstr_copy = mx_sh_treat_params(main);
+        mx_sh_treat_params(main);
+        write(1, "1\n", 2);
+        mx_sh_str_clear(main);
+        mx_sh_treat_brackets(main);
+        mx_sh_str_clear(main);
+        mx_sh_treat_params(main);
+        mx_sh_str_clear(main);
+        mx_sh_treat_commands(main);
+        mx_sh_str_clear(main);        
         count++;
         if (count >= main->pstr_len)
             break;
@@ -480,11 +579,10 @@ void mx_loop(char **env) {
     str = mx_strdup("ls /dev/null");
     main = mx_create_main_sh(str, env);
     main->lstr = mx_parse_input_str(str);
-    //mx_print_str_sh(lstr);
+    mx_print_str_sh(main->lstr);
     mx_get_sh_str_len(main);
     mx_get_sh_pstr(main);
-    mx_create_queue_arr(main);
-
+    mx_execve_pstr(main);
 }
 
 
