@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <sys/stat.h>
 #include <unistd.h>
+//#include <process.h>
 
 #define SPEC_SYMBOL "-$/~\\"
 #define BRACKETS "(){}\'\'\"\""
@@ -270,7 +271,9 @@ t_sh_str_list *mx_parse_input_str(char *str) {
             else if (str[i] == '\"')
                 mx_str_sh_add(&pstr, "\"", 'b', 1); 
             else if (str[i] == '\'')
-                mx_str_sh_add(&pstr, "\'", 'b', 1);       
+                mx_str_sh_add(&pstr, "\'", 'b', 1);
+            else if (str[i] == '`')
+                mx_str_sh_add(&pstr, "`", 'b', 1);   
             else
                 mx_str_sh_add(&pstr, "$", 'b', 1); 
         }
@@ -374,25 +377,25 @@ int mx_get_pipeline_type(char *name) {
 }
 
 
-t_sh_operand *mx_get_operand(t_main_sh *main, char *str) {
-    t_sh_operand *oper = (t_sh_operand*)malloc(sizeof(t_sh_operand));
-    char **param = mx_strsplit(str, ' ');
+// t_sh_operand *mx_get_operand(t_main_sh *main, char *str) {
+//     t_sh_operand *oper = (t_sh_operand*)malloc(sizeof(t_sh_operand));
+//     char **param = mx_strsplit(str, ' ');
 
-    if (param && param[0]) {
-        oper->name = param[0];
-        if (param[1])
-            oper->params = &param[1];
-        else
-            oper->params = NULL;
-    }
-    else {
-        oper->name = NULL;
-        oper->params = NULL;
-    }
-    oper->type = mx_get_operand_type(main, oper->name);
-    oper->pipeline_type = mx_get_pipeline_type(oper->name);
-    return oper;
-}
+//     if (param && param[0]) {
+//         oper->name = param[0];
+//         if (param[1])
+//             oper->params = &param[1];
+//         else
+//             oper->params = NULL;
+//     }
+//     else {
+//         oper->name = NULL;
+//         oper->params = NULL;
+//     }
+//     oper->type = mx_get_operand_type(main, oper->name);
+//     oper->pipeline_type = mx_get_pipeline_type(oper->name);
+//     return oper;
+// }
 
 
 // void mx_add_queue(t_main_sh *main, char *str1, char *str2, char *act) {
@@ -415,12 +418,22 @@ void mx_del_sh_str(t_sh_str **pstr) {
     *pstr = NULL;
 }
 
-t_sh_str *mx_queue_execve_unare(t_main_sh *main, int ind) {
+void mx_queue_execve_unare(t_main_sh *main, int ind) {
     char *com = mx_strdup(main->pstr[ind]->name);
+    char *tmp = NULL;
 
-    if (!mx_strcmp(com, "\"") || !mx_strcmp(com, "\'")) {
+    if (!mx_strcmp(com, "\"") || !mx_strcmp(com, "\'"))
+        main->pstr[ind+1]->type = 's';
+    else if (!mx_strcmp(com, "`") || !mx_strcmp(com, "$("))
+        main->pstr[ind+1]->type = 't';
+//    else if (!mx_strcmp(com, "$") || !mx_strcmp(main->pstr[ind+1]->name, "$")) {
+//        main->pstr[ind]->type = 's';
+//        mx_printint(getpid());
+//    }
         
-    }
+    else
+        return;
+
 }
 
 t_sh_str *mx_queue_execve_binary(t_main_sh *main, int index) {
@@ -429,19 +442,44 @@ t_sh_str *mx_queue_execve_binary(t_main_sh *main, int index) {
     return NULL;
 }
 
+bool mx_back_bracket(char *str1, char *str2) {
+    if (!mx_strcmp(str1, "`") && !mx_strcmp(str2, "`"))
+        return true;
+    else if (!mx_strcmp(str1, "(") && !mx_strcmp(str2, ")"))
+        return true;
+    else if (!mx_strcmp(str1, "$(") && !mx_strcmp(str2, ")"))
+        return true;
+    else if (!mx_strcmp(str1, "${") && !mx_strcmp(str2, "}"))
+        return true;
+    else if (!mx_strcmp(str1, "(") && !mx_strcmp(str2, ")"))
+        return true;
+    else if (!mx_strcmp(str1, "{") && !mx_strcmp(str2, "}"))
+        return true;
+    else if (!mx_strcmp(str1, "\'") && !mx_strcmp(str2, "\'"))
+        return true;
+    else if (!mx_strcmp(str1, "\"") && !mx_strcmp(str2, "\""))
+        return true;
+    else
+        return false;
+}
+
 void mx_sh_treat_brackets(t_main_sh *main) {
     int j = 0;
     t_sh_str *tmp = NULL;
 
     for (int i = 0; main->pstr[i]; i++) {
         if (main->pstr[i]->type == 'b' && main->pstr[i+1] && main->pstr[i+2]
-            && !mx_strcmp(main->pstr[i]->name, main->pstr[i+2]->name)) {
+            && mx_back_bracket(main->pstr[i]->name, main->pstr[i+2]->name)) {
                 main->pstr[i]->type = '=';
                 main->pstr[i+2]->type = '=';
-                tmp = mx_copy_sh_str(main->pstr[i+1]);
-                mx_del_sh_str(&main->pstr[i+1]);
-                main->pstr[i+1] = mx_queue_execve_unare(main, i);
-                mx_del_sh_str(&tmp);
+                mx_queue_execve_unare(main, i);
+                // mx_del_sh_str(&main->pstr[i+1]);
+                // main->pstr[i+1] = mx_copy_sh_str(tmp);
+                // mx_del_sh_str(&tmp);
+        }
+        else if (!mx_strcmp(main->pstr[i]->name, "$")) {
+            main->pstr[i+1]->type = '=';
+            mx_queue_execve_unare(main, i);
         }
     }
 }
@@ -495,7 +533,7 @@ void mx_sh_treat_commands(t_main_sh *main) {
                 tmp = mx_copy_sh_str(main->pstr[i]);
                 mx_del_sh_str(&main->pstr[i]);
                 main->pstr[i] = mx_queue_execve_binary(main, i);
-                mx_del_sh_str(&tmp);      
+                mx_del_sh_str(&tmp);
         }
 }
 
@@ -563,8 +601,11 @@ void mx_execve_pstr(t_main_sh *main) {
         mx_sh_treat_brackets(main);
         mx_print_queue(main);
         mx_sh_str_clear(main);
+        //mx_print_queue(main);
         mx_sh_treat_params(main);
+        //mx_print_queue(main);
         mx_sh_str_clear(main);
+        //mx_print_queue(main);
         mx_sh_treat_commands(main);
         mx_sh_str_clear(main); 
         pstr_len = mx_sh_get_pstr_len(main);
@@ -604,7 +645,7 @@ void mx_loop(char **env) {
     int len = 0;
     t_main_sh *main = NULL;
 
-    str = mx_strdup("ls \"main test\"");
+    str = mx_strdup("ls $$");
     main = mx_create_main_sh(str, env);
     main->lstr = mx_parse_input_str(str);
     //mx_print_str_sh(main->lstr);
